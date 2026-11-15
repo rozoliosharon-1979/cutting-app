@@ -46,6 +46,7 @@ button, .btn { font: inherit; font-size: 15px; font-weight: 600; padding: 9px 14
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 button.ghost { background: transparent; }
+#photoNewBtn { margin: 0 0 10px; }
 #pasteNew { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 12px; margin: 0 0 14px; border: 2px dashed var(--accent); border-radius: 10px; background: var(--card, transparent); color: inherit; resize: none; }
 .filebtn { position: relative; overflow: hidden; display: inline-block; cursor: pointer; }
 .filebtn input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 40px; }
@@ -282,6 +283,8 @@ table.grid .star.on { color: var(--accent); border-color: var(--accent); }
   <input type="file" id="importFile" accept=".xlsx,.xls,.ods,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.oasis.opendocument.spreadsheet,text/csv,application/octet-stream"></span>
       <button id="stockOpen">מלאי שאריות</button>
     </div>
+    <span class="btn filebtn" id="photoNewBtn" hidden>📷 צלם רשימת מידות
+  <input type="file" id="photoNew" accept="image/*"></span>
     <textarea id="pasteNew" rows="3" placeholder="📋 העתק את טבלת החלקים מגוגל שיטס או מאקסל, ולחץ כאן לחיצה ארוכה ← הדבק. ייפתח פרויקט חדש."></textarea>
     <div id="projects" class="plist"><div class="none">טוען את הפרויקטים…</div></div>
     <p class="muted" id="storeNote" style="font-size:14px;margin-top:14px"></p>
@@ -300,7 +303,7 @@ table.grid .star.on { color: var(--accent); border-color: var(--accent); }
       <div class="card">
         <div class="thead"><h2>חלקים</h2><span class="hint">אפשר להעתיק שורות מגוגל שיטס או מאקסל ולהדביק כאן</span></div>
         <div class="tscroll"><table class="grid" id="tParts"></table></div>
-        <div class="row" style="margin-top:8px"><button id="addPart">+ שורה</button><span class="sum" id="partsSum"></span></div>
+        <div class="row" style="margin-top:8px"><button id="addPart">+ שורה</button><span class="btn filebtn" id="photoAddBtn" hidden>📷 הוסף מצילום<input type="file" id="photoAdd" accept="image/*"></span><span class="sum" id="partsSum"></span></div>
       </div>
       <div class="card">
         <div class="thead"><h2>לוחות</h2><span class="hint">כמות ריקה = כמה שצריך</span></div>
@@ -3633,6 +3636,42 @@ function updateGo() {
   $("useStockWrap").hidden = !n;
   $("useStockText").textContent = `להשתמש בשאריות מהמלאי (${n} מתאימות)`;
 }
+// צילום רשימת מידות (כתב יד או מודפס): Claude קורא את התמונה דרך קוד השמירה בגוגל
+async function photoToRows(file) {
+  const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = URL.createObjectURL(file); });
+  const k = Math.min(1, 1800 / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  const b64 = c.toDataURL("image/jpeg", 0.88).split(",")[1];
+  return Cloud.post({ op: "read", img: b64, type: "image/jpeg" });
+}
+async function photoImport(file, intoCurrent) {
+  if (!file) return;
+  $("busy").hidden = false; $("busyText").textContent = "קורא את הצילום… (עד חצי דקה)";
+  try {
+    const r = await photoToRows(file);
+    const rows = (r.parts || []).filter(x => x.length > 0 && x.width > 0);
+    if (!rows.length) throw new Error("לא מצאתי בצילום שורות עם מידות. נסה צילום ישר וקרוב יותר, באור טוב.");
+    if (!intoCurrent) {
+      const p = Object.assign({ id: uidGen() }, newProject());
+      projects.push(p); cur = JSON.parse(JSON.stringify(p)); res = null; cur.parts = [];
+    } else cur.parts = cur.parts.filter(x => PART_COLS.some(c => c.type !== "bool" && String(x[c.k] ?? "") !== ""));
+    for (const x of rows) cur.parts.push(Object.assign(emptyPart(), {
+      name: (x.doubt ? "⚠ " : "") + (x.name || ""), length: String(x.length), width: String(x.width), qty: String(x.qty || 1) }));
+    cur.parts.push(emptyPart());
+    fillEditor(); show("edit"); touch(); await saveNow();
+    const nd = rows.filter(x => x.doubt).length;
+    toast(`נקראו ${rows.length} שורות מהצילום.` + (nd ? ` ${nd} מסומנות ⚠ - בדוק אותן מול הדף.` : " בדוק אותן מול הדף.") + (r.note ? " הערה: " + r.note : ""));
+  } catch (e) {
+    const m = String(e && e.message || "");
+    toast(m === "nokey" ? "קריאת צילומים עוד לא הופעלה: חסר מפתח Claude בקוד השמירה בגוגל."
+      : m === "refusal" || m === "api" || m === "parse" || m === "cloud" || m === "key" ? "לא הצלחתי לקרוא את הצילום. נסה שוב, או צלם ישר וקרוב יותר."
+      : m.length > 3 && !/fetch|network/i.test(m) ? m : "אין חיבור לאינטרנט כרגע. נסה שוב.");
+  }
+  $("busy").hidden = true;
+}
+$("photoNew").onchange = e => { const f = e.target.files[0]; e.target.value = ""; photoImport(f, false); };
+$("photoAdd").onchange = e => { const f = e.target.files[0]; e.target.value = ""; photoImport(f, true); };
 $("pasteNew").addEventListener("input", async () => {
   const text = $("pasteNew").value;
   if (!text.includes("\t")) { if (text.includes("\n") || text.length > 40) { $("pasteNew").value = ""; toast("זה לא נראה כמו טבלה. סמן בגיליון כמה תאים (שורות ועמודות), העתק והדבק כאן."); } return; }
@@ -3991,8 +4030,11 @@ $("importFile").onchange = async e => {
       .filter(r => r.some(v => String(v).trim() !== ""));
     const extra = ["פרויקט", "פרטי פרויקט", "project", "קנט", "קנטים", "banding", "edges"];
     const data = wb.SheetNames.filter(n => !extra.includes(norm(n)));
-    const bName = find(["לוחות", "פלטות", "boards", "stock", "sheets"]) || data[0];
-    const pName = find(["חלקים", "parts", "pieces", "cuts"]) || data[1];
+    let bName = find(["לוחות", "פלטות", "boards", "stock", "sheets"]);
+    let pName = find(["חלקים", "parts", "pieces", "cuts"]);
+    // קובץ עם לשונית אחת (למשל מאפליקציית "צילום לאקסל"): זו רשימת החלקים
+    if (!bName && !pName && data.length === 1) pName = data[0];
+    else { bName = bName || data[0]; pName = pName || data[1]; }
     const cellText = v => v instanceof Date ? `${String(v.getDate()).padStart(2, "0")}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getFullYear()).slice(2)}`
       : (typeof v === "number" ? String(+v.toFixed(6)) : String(v).trim());
     const table = (name, cols) => {
@@ -4002,6 +4044,18 @@ $("importFile").onchange = async e => {
       const head = rows[0].map(norm);
       const idx = {};
       for (const c of cols) { const j = head.findIndex(h => (COLS[c.k] || []).includes(h)); if (j >= 0) idx[c.k] = j; }
+      if (idx.length == null && idx.width == null) {
+        // בלי כותרות מוכרות: בכל שורה, המספרים לפי הסדר = אורך, רוחב, כמות, והמילים = שם
+        const num = v => /^\d+([.,]\d+)?$/.test(cellText(v).replace(/\s/g, ""));
+        return rows.map(r => {
+          const nums = r.filter(num).map(v => cellText(v).replace(",", "."));
+          if (nums.length < 2) return null;
+          const o = Object.fromEntries(cols.map(c => [c.k, c.type === "bool" ? false : ""]));
+          o.length = nums[0]; o.width = nums[1]; if ("qty" in o) o.qty = nums[2] || "1";
+          if ("name" in o) o.name = r.filter(v => cellText(v) && !num(v)).map(cellText).join(" ");
+          return o;
+        }).filter(Boolean);
+      }
       return rows.slice(1).map(r => Object.fromEntries(cols.map(c => [c.k, c.type === "bool"
         ? ["כן", "yes", "y", "true", "1", "v", "✓", "x", "מותר"].includes(norm(r[idx[c.k]] ?? ""))
         : idx[c.k] != null ? cellText(r[idx[c.k]]) : ""])));
@@ -4197,6 +4251,8 @@ document.addEventListener("focusin", e => {
     : Store.mode === "cloud" ? "מתחבר לשמירה בגוגל…" : "הפרויקטים נשמרים רק במכשיר הזה.";
   if (WEB && LS.get("cut-imported")) { const n = LS.get("cut-imported"); LS.del("cut-imported"); setTimeout(() => toast(`הועברו ${n} פרויקטים ונתונים מהאפליקציה הקודמת.`), 3500); }
   if (WEB && LS.get("cut-justConnected")) { LS.del("cut-justConnected"); toast("השמירה בגוגל חוברה. הפרויקטים יופיעו בכל מכשיר שחיברת."); }
+  const PHOTO = false; // יופעל כשהקוד בגוגל יעודכן עם קריאת צילומים
+  if (PHOTO && WEB && Cloud.on()) { $("photoNewBtn").hidden = false; $("photoAddBtn").hidden = false; }
   if (WEB) Store._onExtra = async () => { stock = await Store.getStock(); lib = await Store.getLib(); if (view === "stock") renderStock(); };
   stock = await Store.getStock();
   lib = await Store.getLib();
