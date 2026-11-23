@@ -3870,12 +3870,15 @@ async function makePdf(ctx) {
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
-    const PW = 1240, PH = 1754, M = 60;          // דף A4 ב-150dpi
+    const M = 60;                                 // דף A4 ב-150dpi
+    let PW = 1240, PH = 1754, land = false;       // דפי הלוחות לרוחב, כדי שהלוח יהיה גדול לאורך הדף
     let page = null, g = null, y = 0, first = true;
-    const newPage = () => {
-      if (page) { pdf.addImage(page.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, 297); }
-      if (!first) pdf.addPage();
-      first = false;
+    const flush = () => { if (page) pdf.addImage(page.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, land ? 297 : 210, land ? 210 : 297); };
+    const newPage = (wide = false) => {
+      flush();
+      if (first) { if (wide) { pdf.deletePage(1); pdf.addPage("a4", "landscape"); } }
+      else pdf.addPage("a4", wide ? "landscape" : "portrait");
+      first = false; land = wide; PW = wide ? 1754 : 1240; PH = wide ? 1240 : 1754;
       page = document.createElement("canvas"); page.width = PW; page.height = PH;
       g = page.getContext("2d");
       g.fillStyle = "#fff"; g.fillRect(0, 0, PW, PH);
@@ -3900,7 +3903,7 @@ async function makePdf(ctx) {
     };
     const textLines = (text, font, lh, color = "#111", indent = 0) => {
       for (const l of wrap(text, font, PW - 2 * M - indent)) {
-        if (y + lh > PH - M) newPage();
+        if (y + lh > PH - M) newPage(land);
         g.font = font; g.fillStyle = color; g.fillText(l, PW - M - indent, y + lh * 0.8); y += lh;
       }
     };
@@ -3913,7 +3916,7 @@ async function makePdf(ctx) {
       const sec = secs[k++];
       const mine = mineOf(b);
       if (!mine.length) continue;
-      newPage();
+      newPage(true);
       const used = mine.reduce((s, p) => s + p.length * p.width, 0);
       textLines(`לוח ${b.i}: ${b.name}  ${LRI}${ctx.fmt(b.L)} × ${ctx.fmt(b.W)}${PDI}`, "bold 40px Arial", 52);
       const nClash = mine.filter(ctx.clashes).length, steps = ctx.cutSteps(b, mine, nClash);
@@ -3923,7 +3926,10 @@ async function makePdf(ctx) {
       const svg = sec && sec.querySelector("svg.b");
       if (svg) {
         const im = await svgImage(svg, PW - 2 * M);
-        const maxH = PH * 0.55, s = Math.min(1, maxH / im.h);
+        // אותו מקום לטבלה בכל הלוחות, כדי שכל הלוחות יצוירו באותו גודל
+        const tableH = (Math.max(...ctx.D.boards.map(q => Math.ceil(mineOf(q).length / 3))) + 2) * 34 + 40;
+        const room = PH - M - y - 18;
+        const maxH = room - tableH >= room * 0.6 ? room - tableH : room, s = Math.min(1, maxH / im.h);
         g.drawImage(im.img, M + (PW - 2 * M - im.w * s), y, im.w * s, im.h * s);
         y += im.h * s + 18;
       }
@@ -3937,11 +3943,11 @@ async function makePdf(ctx) {
         g.textAlign = "center"; g.font = (bold ? "" : "bold ") + "26px Arial";
         g.fillText(c, x0 - colW + 150, yy); g.fillText(d, x0 - colW + 60, yy); g.textAlign = "right";
       };
-      if (y + lh * (rows + 1) > PH - M) newPage();
+      if (y + lh * (rows + 1) > PH - M) newPage(true);
       for (let cI = 0; cI < Math.min(ncol, list.length); cI++) drawRow(PW - M - cI * colW, y + 26, "מס'", "שם", "↔", "↕", true);
       y += lh;
       for (let r = 0; r < rows; r++) {
-        if (y + lh > PH - M) newPage();
+        if (y + lh > PH - M) newPage(true);
         for (let cI = 0; cI < ncol; cI++) {
           const p = list[cI * rows + r];
           if (!p) continue;
@@ -3983,7 +3989,7 @@ async function makePdf(ctx) {
       row(t.header, true);
       t.rows.forEach(r => row(r, false));
     }
-    pdf.addImage(page.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, 297);
+    flush();
     $("busy").hidden = true;
     await APP.download("pdf", pdf.output("blob"));
   } catch (e) {
