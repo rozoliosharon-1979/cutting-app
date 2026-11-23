@@ -288,6 +288,7 @@ table.grid .star.on { color: var(--accent); border-color: var(--accent); }
     <textarea id="pasteNew" rows="3" placeholder="📋 העתק את טבלת החלקים מגוגל שיטס או מאקסל, ולחץ כאן לחיצה ארוכה ← הדבק. ייפתח פרויקט חדש."></textarea>
     <div id="projects" class="plist"><div class="none">טוען את הפרויקטים…</div></div>
     <p class="muted" id="storeNote" style="font-size:14px;margin-top:14px"></p>
+    <input type="text" id="connectPaste" hidden autocomplete="off" style="width:100%;max-width:520px;box-sizing:border-box;padding:10px;font-size:15px;border:1px dashed #1d6b3f;border-radius:10px" placeholder="🔗 לחיבור לשמירה בגוגל: הדבק כאן את קישור החיבור">
   </section>
 
   <!-- עריכת פרויקט -->
@@ -4256,6 +4257,14 @@ document.addEventListener("focusin", e => {
   $("storeNote").textContent = Store.mode === "db"
     ? "הפרויקטים נשמרים בחשבון שלך, ומופיעים גם בטלפון וגם במחשב."
     : Store.mode === "cloud" ? "מתחבר לשמירה בגוגל…" : "הפרויקטים נשמרים רק במכשיר הזה.";
+  if (WEB && Store.mode === "local") {
+    const cp = $("connectPaste"); cp.hidden = false;
+    cp.oninput = () => {
+      const m = cp.value.trim().match(/#connect=.+$/);
+      if (!m) { if (cp.value.trim()) toast("זה לא קישור חיבור. הדבק את הקישור שמתחיל ב-https://rozoliosharon"); return; }
+      location.hash = m[0].slice(1); location.reload();
+    };
+  }
   if (WEB && LS.get("cut-imported")) { const n = LS.get("cut-imported"); LS.del("cut-imported"); setTimeout(() => toast(`הועברו ${n} פרויקטים ונתונים מהאפליקציה הקודמת.`), 3500); }
   if (WEB && LS.get("cut-justConnected")) { LS.del("cut-justConnected"); toast("השמירה בגוגל חוברה. הפרויקטים יופיעו בכל מכשיר שחיברת."); }
   const PHOTO = false; // יופעל כשהקוד בגוגל יעודכן עם קריאת צילומים
