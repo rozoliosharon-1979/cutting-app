@@ -303,7 +303,7 @@ table.grid .star.on { color: var(--accent); border-color: var(--accent); }
       <div class="card">
         <div class="thead"><h2>חלקים</h2><span class="hint">אפשר להעתיק שורות מגוגל שיטס או מאקסל ולהדביק כאן</span></div>
         <div class="tscroll"><table class="grid" id="tParts"></table></div>
-        <div class="row" style="margin-top:8px"><button id="addPart">+ שורה</button><span class="btn filebtn" id="photoAddBtn" hidden>📷 הוסף מצילום<input type="file" id="photoAdd" accept="image/*"></span><span class="sum" id="partsSum"></span></div>
+        <div class="row" style="margin-top:8px"><button id="addPart">+ שורה</button><button id="rotAll">↻ סיבוב מותר לכולם</button><span class="btn filebtn" id="photoAddBtn" hidden>📷 הוסף מצילום<input type="file" id="photoAdd" accept="image/*"></span><span class="sum" id="partsSum"></span></div>
       </div>
       <div class="card">
         <div class="thead"><h2>לוחות</h2><span class="hint">כמות ריקה = כמה שצריך</span></div>
@@ -3375,7 +3375,7 @@ let cur = null;            // הפרויקט הפתוח
 let res = null;            // תוצאת החישוב האחרונה של הפרויקט הפתוח
 let view = "list";
 const uidGen = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const emptyPart = () => ({ name: "", length: "", width: "", qty: "", rotate: false, material: "", group: "" });
+const emptyPart = () => ({ name: "", length: "", width: "", qty: "", rotate: true, material: "", group: "" });
 const emptyBoard = () => ({ name: "", material: "", length: "", width: "", qty: "", price: "" });
 function newProject() {
   const d = new Date();
@@ -3480,6 +3480,7 @@ $("sMode").addEventListener("change", e => { cur.mode = e.target.value; touch();
 
 function renderTable(tid, cols, rows) {
   const t = $(tid);
+  if (tid === "tParts" && $("rotAll")) $("rotAll").textContent = rows.filter(r => r.length || r.width).every(r => r.rotate) ? "↻ בטל סיבוב לכולם" : "↻ סיבוב מותר לכולם";
   const list = tid === "tParts" ? ` list="matList"` : "";
   const fav = tid === "tBoards";
   t.innerHTML = `<thead><tr><th></th>${cols.map(c => `<th class="${c.cls}">${c.t}</th>`).join("")}${fav ? "<th>קבוע</th>" : ""}<th></th></tr></thead><tbody></tbody>`;
@@ -3588,6 +3589,12 @@ function pasteInto(ev, tid, cols, rows) {
   touch();
   toast(`הודבקו ${grid.length} שורות`);
 }
+$("rotAll").onclick = () => {
+  const on = !cur.parts.filter(r => r.length || r.width).every(r => r.rotate);
+  cur.parts.forEach(r => { r.rotate = on; });
+  renderTable("tParts", PART_COLS, cur.parts); touch();
+  toast(on ? "כל החלקים: סיבוב מותר" : "כל החלקים: בלי סיבוב");
+};
 $("addPart").onclick = () => { cur.parts.push(emptyPart()); renderTable("tParts", PART_COLS, cur.parts); focusCell("tParts", cur.parts.length - 1, "name"); touch(); };
 // לוחות קבועים: נשמרים פעם אחת, ובכל פרויקט רק מסמנים אותם
 let lib = [];
@@ -4050,14 +4057,14 @@ $("importFile").onchange = async e => {
         return rows.map(r => {
           const nums = r.filter(num).map(v => cellText(v).replace(",", "."));
           if (nums.length < 2) return null;
-          const o = Object.fromEntries(cols.map(c => [c.k, c.type === "bool" ? false : ""]));
+          const o = Object.fromEntries(cols.map(c => [c.k, c.type === "bool" ? c.k === "rotate" : ""]));
           o.length = nums[0]; o.width = nums[1]; if ("qty" in o) o.qty = nums[2] || "1";
           if ("name" in o) o.name = r.filter(v => cellText(v) && !num(v)).map(cellText).join(" ");
           return o;
         }).filter(Boolean);
       }
       return rows.slice(1).map(r => Object.fromEntries(cols.map(c => [c.k, c.type === "bool"
-        ? ["כן", "yes", "y", "true", "1", "v", "✓", "x", "מותר"].includes(norm(r[idx[c.k]] ?? ""))
+        ? (idx[c.k] == null ? c.k === "rotate" : ["כן", "yes", "y", "true", "1", "v", "✓", "x", "מותר"].includes(norm(r[idx[c.k]] ?? "")))
         : idx[c.k] != null ? cellText(r[idx[c.k]]) : ""])));
     };
     const parts = table(pName, PART_COLS), boards = table(bName, BOARD_COLS);
