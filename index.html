@@ -46,9 +46,11 @@ button, .btn { font: inherit; font-size: 15px; font-weight: 600; padding: 9px 14
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 button.ghost { background: transparent; }
-#photoNewBtn { margin: 0 0 10px; }
 #pasteNew { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 12px; margin: 0 0 14px; border: 2px dashed var(--accent); border-radius: 10px; background: var(--card, transparent); color: inherit; resize: none; }
 .filebtn { position: relative; overflow: hidden; display: inline-block; cursor: pointer; }
+.filebtn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+#photoRow { margin: 0 0 14px; }
+#photoRow .filebtn { font-size: 17px; padding: 12px 18px; }
 .filebtn input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 40px; }
 button.danger { color: var(--bad); }
 button:disabled { opacity: .5; cursor: default; }
@@ -283,8 +285,13 @@ table.grid .star.on { color: var(--accent); border-color: var(--accent); }
   <input type="file" id="importFile" accept=".xlsx,.xls,.ods,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.oasis.opendocument.spreadsheet,text/csv,application/octet-stream"></span>
       <button id="stockOpen">מלאי שאריות</button>
     </div>
-    <span class="btn filebtn" id="photoNewBtn" hidden>📷 צלם רשימת מידות
-  <input type="file" id="photoNew" accept="image/*"></span>
+    <div class="row" id="photoRow">
+      <span class="btn filebtn primary">📷 צלם רשימת חלקים
+        <input type="file" id="camFile" accept="image/*" capture="environment" aria-label="צלם רשימת חלקים"></span>
+      <span class="btn filebtn">🖼️ תמונה מהגלריה
+        <input type="file" id="camPick" accept="image/*" aria-label="בחר תמונה מהגלריה"></span>
+      <span class="muted" style="font-size:14px">מצלמים דף בכתב יד, והפריסה מחושבת מיד</span>
+    </div>
     <textarea id="pasteNew" rows="3" placeholder="📋 העתק את טבלת החלקים מגוגל שיטס או מאקסל, ולחץ כאן לחיצה ארוכה ← הדבק. ייפתח פרויקט חדש."></textarea>
     <div id="projects" class="plist"><div class="none">טוען את הפרויקטים…</div></div>
     <p class="muted" id="storeNote" style="font-size:14px;margin-top:14px"></p>
@@ -304,7 +311,8 @@ table.grid .star.on { color: var(--accent); border-color: var(--accent); }
       <div class="card">
         <div class="thead"><h2>חלקים</h2><span class="hint">אפשר להעתיק שורות מגוגל שיטס או מאקסל ולהדביק כאן</span></div>
         <div class="tscroll"><table class="grid" id="tParts"></table></div>
-        <div class="row" style="margin-top:8px"><button id="addPart">+ שורה</button><button id="rotAll">↻ סיבוב מותר לכולם</button><span class="btn filebtn" id="photoAddBtn" hidden>📷 הוסף מצילום<input type="file" id="photoAdd" accept="image/*"></span><span class="sum" id="partsSum"></span></div>
+        <div class="row" style="margin-top:8px"><button id="addPart">+ שורה</button><button id="rotAll">↻ סיבוב מותר לכולם</button><span class="btn filebtn" id="photoAddBtn">📷 הוסף מצילום
+          <input type="file" id="camAdd" accept="image/*" capture="environment" aria-label="הוסף חלקים מצילום"></span><span class="sum" id="partsSum"></span></div>
       </div>
       <div class="card">
         <div class="thead"><h2>לוחות</h2><span class="hint">כמות ריקה = כמה שצריך</span></div>
@@ -3392,7 +3400,7 @@ const inputHash = p => JSON.stringify([p.parts, p.boards, p.kerf, p.trim, p.mode
 function toast(msg) {
   const t = $("appToast");
   t.textContent = msg; t.hidden = false;
-  clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 3200);
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, msg.length > 80 ? 8000 : 3200);
 }
 function show(v) {
   view = v;
@@ -3644,42 +3652,6 @@ function updateGo() {
   $("useStockWrap").hidden = !n;
   $("useStockText").textContent = `להשתמש בשאריות מהמלאי (${n} מתאימות)`;
 }
-// צילום רשימת מידות (כתב יד או מודפס): Claude קורא את התמונה דרך קוד השמירה בגוגל
-async function photoToRows(file) {
-  const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = URL.createObjectURL(file); });
-  const k = Math.min(1, 1800 / Math.max(img.naturalWidth, img.naturalHeight));
-  const c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  const b64 = c.toDataURL("image/jpeg", 0.88).split(",")[1];
-  return Cloud.post({ op: "read", img: b64, type: "image/jpeg" });
-}
-async function photoImport(file, intoCurrent) {
-  if (!file) return;
-  $("busy").hidden = false; $("busyText").textContent = "קורא את הצילום… (עד חצי דקה)";
-  try {
-    const r = await photoToRows(file);
-    const rows = (r.parts || []).filter(x => x.length > 0 && x.width > 0);
-    if (!rows.length) throw new Error("לא מצאתי בצילום שורות עם מידות. נסה צילום ישר וקרוב יותר, באור טוב.");
-    if (!intoCurrent) {
-      const p = Object.assign({ id: uidGen() }, newProject());
-      projects.push(p); cur = JSON.parse(JSON.stringify(p)); res = null; cur.parts = [];
-    } else cur.parts = cur.parts.filter(x => PART_COLS.some(c => c.type !== "bool" && String(x[c.k] ?? "") !== ""));
-    for (const x of rows) cur.parts.push(Object.assign(emptyPart(), {
-      name: (x.doubt ? "⚠ " : "") + (x.name || ""), length: String(x.length), width: String(x.width), qty: String(x.qty || 1) }));
-    cur.parts.push(emptyPart());
-    fillEditor(); show("edit"); touch(); await saveNow();
-    const nd = rows.filter(x => x.doubt).length;
-    toast(`נקראו ${rows.length} שורות מהצילום.` + (nd ? ` ${nd} מסומנות ⚠ - בדוק אותן מול הדף.` : " בדוק אותן מול הדף.") + (r.note ? " הערה: " + r.note : ""));
-  } catch (e) {
-    const m = String(e && e.message || "");
-    toast(m === "nokey" ? "קריאת צילומים עוד לא הופעלה: חסר מפתח Claude בקוד השמירה בגוגל."
-      : m === "refusal" || m === "api" || m === "parse" || m === "cloud" || m === "key" ? "לא הצלחתי לקרוא את הצילום. נסה שוב, או צלם ישר וקרוב יותר."
-      : m.length > 3 && !/fetch|network/i.test(m) ? m : "אין חיבור לאינטרנט כרגע. נסה שוב.");
-  }
-  $("busy").hidden = true;
-}
-$("photoNew").onchange = e => { const f = e.target.files[0]; e.target.value = ""; photoImport(f, false); };
-$("photoAdd").onchange = e => { const f = e.target.files[0]; e.target.value = ""; photoImport(f, true); };
 $("pasteNew").addEventListener("input", async () => {
   const text = $("pasteNew").value;
   if (!text.includes("\t")) { if (text.includes("\n") || text.length > 40) { $("pasteNew").value = ""; toast("זה לא נראה כמו טבלה. סמן בגיליון כמה תאים (שורות ועמודות), העתק והדבק כאן."); } return; }
@@ -3813,6 +3785,7 @@ function showLayout(key) {
   show("lay");
   $("layTitle").textContent = projTitle(cur);
   $("layNote").textContent = res.hash === inputHash(cur) ? "" : "שינית את הטבלאות אחרי החישוב. לחץ 'חזרה לטבלאות' ואז 'חשב שוב'.";
+  if (photoWarn && photoWarn.id === cur.id) $("layNote").textContent = (photoWarn.text + " " + $("layNote").textContent).trim();
   $("editMode").hidden = !matchMedia("(pointer: coarse)").matches;
   $("zoomBtn").hidden = innerWidth > 720 && !APP.zoom;
   $("lay").classList.toggle("zoom", !!APP.zoom);
@@ -4091,6 +4064,100 @@ $("importFile").onchange = async e => {
 };
 
 // ---------------------------------------------------------------------------
+// צילום רשימת חלקים בכתב יד: Claude קורא את הדף, נפתח פרויקט, והפריסה מחושבת מיד
+// ---------------------------------------------------------------------------
+let photoWarn = null;
+const PHOTO_PROMPT = `You are reading a photo of a handwritten cut list from a carpentry shop (usually in Hebrew): panels to cut from sheet boards.
+Image 1 is the whole page. Any further images are zoomed, overlapping quarters of the SAME page (top-right, top-left, bottom-right, bottom-left) to help read small digits; do not count a row twice.
+The page may be photographed sideways or upside down: read it in its correct orientation.
+Hebrew is written right to left, so in each row the rightmost item is usually the part name.
+Each row is one part: name/description, length, width (millimetres), quantity, and sometimes material (e.g. MDF 18, סנדוויץ', פורמייקה) or a note.
+- Sizes may be written "600x400", "600*400", "600/400" or in separate columns. Keep the order as written: first number = length, second = width, unless column headers say otherwise.
+- Quantity: a number like "2 יח'", "x2", "×2" or a quantity column. Missing quantity = 1.
+- If the page says the sizes are in centimetres (ס"מ), convert to millimetres (×10). Otherwise keep the numbers as written.
+- A heading line that names a material (or a group/cabinet name) applies to the rows under it: put it in material (or group).
+- rotate = true only if it says rotation is allowed or the part has no grain direction (מותר לסובב / בלי כיוון סיבים / ללא סיבים). Otherwise false.
+- Ignore crossed-out, erased or very faint writing, totals and prices.
+- Read every digit carefully: 1 / 4 / 7, 0 / 6 / 8, 3 / 8, 5 / 6. Write Hebrew names exactly as written, letter by letter.
+Reply with only JSON, no other text:
+{"parts":[{"name":"דלת","length":716,"width":396,"qty":2,"material":"","rotate":false,"group":""}],"unsure":["short Hebrew notes on values you were not sure of"]}`;
+
+async function prepPhoto(file, maxCount) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: "from-image" }); } catch (e) { bmp = await createImageBitmap(file); }
+  const W = bmp.width, H = bmp.height;
+  const cut = (sx, sy, sw, sh, maxSide) => {
+    const k = Math.min(1, maxSide / Math.max(sw, sh));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    return new Promise((ok, bad) => c.toBlob(b => b ? ok(b) : bad(new Error("image")), "image/jpeg", 0.9));
+  };
+  const out = [await cut(0, 0, W, H, 2200)];
+  if (maxCount >= 5) {
+    const tw = W * 0.62, th = H * 0.62;
+    for (const [x, y] of [[W - tw, 0], [0, 0], [W - tw, H - th], [0, H - th]]) out.push(await cut(x, y, tw, th, 1800));
+  }
+  return out;
+}
+function photoRows(data) {
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.parts) ? data.parts : []);
+  const n = v => { const t = String(v ?? "").replace(/[^\d.,]/g, "").replace(",", "."); return t && isFinite(+t) && +t > 0 ? String(+t) : ""; };
+  return list.map(r => ({ name: String(r.name ?? "").trim(), length: n(r.length), width: n(r.width), qty: n(r.qty) || "1",
+      rotate: r.rotate === true || isYesTxt(r.rotate), material: String(r.material ?? "").trim(), group: String(r.group ?? "").trim() }))
+    .filter(r => r.length && r.width);
+}
+const isYesTxt = v => ["כן", "yes", "y", "true", "1", "v", "✓", "x", "מותר"].includes(String(v ?? "").trim().toLowerCase());
+function photoErr(e) {
+  const c = e && e.code;
+  if (c === "not_granted") return "צריך לאשר ל-Claude לקרוא את התמונה. נסה שוב ולחץ 'אישור'.";
+  if (c === "rate_limited") return "יותר מדי קריאות ברצף. נסה שוב בעוד דקה.";
+  if (c === "invalid_json" || c === "empty_completion" || c === "refused") return "לא הצלחתי לקרוא את הדף. נסה צילום ישר וברור יותר, עם אור טוב.";
+  if (c === "image_rejected") return "התמונה לא נקלטה. נסה לצלם שוב.";
+  if (c === "images_unavailable" || c === "sampling_disabled") return "קריאת תמונות לא זמינה כאן. פתח את האפליקציה מהקישור שלה בכרום.";
+  return "הקריאה לא הצליחה. בדוק את החיבור ונסה שוב" + (c ? ` (קוד: ${c})` : "") + ".";
+}
+async function photoParts(file, addToCur) {
+  if (!file) return;
+  $("busy").hidden = false; $("busyText").textContent = "מכין את התמונה…";
+  try {
+    const sample = window.claude && window.claude.use ? await window.claude.use("sample") : null;
+    const lim = sample ? await sample.limits().catch(() => null) : null;
+    if (!sample || !lim || !lim.images) throw { code: "images_unavailable" };
+    const images = await prepPhoto(file, lim.images.maxCount || 1);
+    $("busyText").textContent = "קורא את הדף… זה לוקח עד דקה";
+    const data = await sample.json(PHOTO_PROMPT, { images, modelTier: "complex" });
+    const rows = photoRows(data);
+    if (!rows.length) { $("busy").hidden = true; toast("לא מצאתי בתמונה שורות עם אורך ורוחב. נסה צילום ברור יותר."); return; }
+    const unsure = (data && Array.isArray(data.unsure) ? data.unsure : []).map(String).filter(Boolean).slice(0, 4);
+    $("busy").hidden = true;
+    if (addToCur && cur) {
+      const blank = r => !String(r.length).trim() && !String(r.width).trim() && !String(r.name).trim();
+      cur.parts = cur.parts.filter(r => !blank(r)).concat(rows, [emptyPart()]);
+      renderTable("tParts", PART_COLS, cur.parts); touch(); await saveNow();
+      toast(`נוספו ${rows.length} שורות מהצילום. בדוק אותן ולחץ "חשב שוב".` + (unsure.length ? " לא בטוח: " + unsure.join("; ") : ""));
+      return;
+    }
+    const p = Object.assign({ id: uidGen() }, newProject());
+    p.name = "מצילום";
+    p.parts = rows.concat([emptyPart()]);
+    const mats = [...new Set(rows.map(r => r.material).filter(Boolean))];
+    if (mats.length) p.boards = mats.map(m => ({ name: m, material: m, length: 2440, width: 1220, qty: "", price: "" })).concat([emptyBoard()]);
+    projects.push(p);
+    cur = JSON.parse(JSON.stringify(p)); res = null;
+    fillEditor(); show("edit"); await saveNow();
+    photoWarn = { id: cur.id, text: `נקראו ${rows.length} שורות מהצילום. בדוק אותן ב"חזרה לטבלאות".` +
+      (mats.length ? " לוחות לפי החומרים שבדף, 2440×1220: בדוק את המידות." : "") + (unsure.length ? " לא בטוח: " + unsure.join("; ") + "." : "") };
+    $("goBtn").click();
+  } catch (e) {
+    $("busy").hidden = true;
+    toast(photoErr(e));
+  }
+}
+for (const [id, add] of [["camFile", false], ["camPick", false], ["camAdd", true]])
+  $(id).onchange = e => { const f = e.target.files[0]; e.target.value = ""; photoParts(f, add); };
+// ---------------------------------------------------------------------------
 // מלאי שאריות: מסך נפרד. שימוש בשאריות - רק כשמסמנים בהרצה. עדכון המלאי - רק כשלוחצים "חתכתי"
 // ---------------------------------------------------------------------------
 let stock = [];
@@ -4267,8 +4334,7 @@ document.addEventListener("focusin", e => {
   }
   if (WEB && LS.get("cut-imported")) { const n = LS.get("cut-imported"); LS.del("cut-imported"); setTimeout(() => toast(`הועברו ${n} פרויקטים ונתונים מהאפליקציה הקודמת.`), 3500); }
   if (WEB && LS.get("cut-justConnected")) { LS.del("cut-justConnected"); toast("השמירה בגוגל חוברה. הפרויקטים יופיעו בכל מכשיר שחיברת."); }
-  const PHOTO = false; // יופעל כשהקוד בגוגל יעודכן עם קריאת צילומים
-  if (PHOTO && WEB && Cloud.on()) { $("photoNewBtn").hidden = false; $("photoAddBtn").hidden = false; }
+  if (WEB) { $("photoRow").hidden = true; $("photoAddBtn").hidden = true; }  // קריאת צילום עובדת רק בגרסה שבתוך Claude
   if (WEB) Store._onExtra = async () => { stock = await Store.getStock(); lib = await Store.getLib(); if (view === "stock") renderStock(); };
   stock = await Store.getStock();
   lib = await Store.getLib();
